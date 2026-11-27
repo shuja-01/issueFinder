@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IssueMatcher — Intelligent Jira Discovery</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <!-- Top Navigation Bar -->
+  <header class="navbar">
+    <div class="navbar-inner">
+      <div class="brand">
+        <div class="brand-icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="7"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <span class="brand-name">IssueMatcher</span>
+          <span class="brand-tagline">Intelligent Jira discovery</span>
+        </div>
+      </div>
+
+      <div class="navbar-actions">
+        <button id="openGuideBtn" type="button" class="nav-pill nav-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+          </svg>
+          User Guide
+        </button>
+
+        <span class="nav-pill nav-muted">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+          </svg>
+          Authorized access
+        </span>
+
+        <!-- Shown when connected -->
+        <div id="navUserChip" class="nav-user-chip hidden">
+          <span id="navUserInitials" class="nav-avatar">U</span>
+          <div class="nav-user-meta">
+            <span id="navUserName" class="nav-user-name">User</span>
+            <span id="navUserId" class="nav-user-id">username</span>
+          </div>
+        </div>
+
+        <span id="navStatusPill" class="nav-pill status-disconnected">
+          <span class="status-dot"></span>
+          <span id="navStatusText">Jira not connected</span>
+        </span>
+
+        <button id="disconnectBtn" type="button" class="nav-pill nav-disconnect hidden">
+          Disconnect
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="page-container">
+    <!-- Hero Header -->
+    <section class="hero">
+      <div class="hero-badge">
+        <span class="ai-badge-dot">AI</span>
+        <span>Jira similarity search</span>
+      </div>
+      <h1 class="hero-title">
+        Find existing issues<br />
+        <span class="hero-title-accent">before creating duplicates.</span>
+      </h1>
+      <p class="hero-subtitle">
+        Describe an issue, paste a Jira summary, or enter a ticket key. IssueMatcher searches Jira using your own permissions and ranks the closest matches.
+      </p>
+      <p class="hero-security-caption">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+        </svg>
+        Your credentials are held temporarily in backend memory only and are never stored in your browser.
+      </p>
+    </section>
+
+    <!-- AUTHENTICATION VIEW (Shown when disconnected) -->
+    <section id="authSection" class="auth-card">
+      <div class="auth-sidebar">
+        <div class="auth-shield-circle">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            <polyline points="9 12 11 14 15 10"></polyline>
+          </svg>
+        </div>
+        <div class="auth-sidebar-pill">
+          <span class="sidebar-dot"></span>
+          Secure Jira connection
+        </div>
+        <ul class="auth-sidebar-list">
+          <li>Searches strictly under your own Jira permissions</li>
+          <li>Supports direct Jira username &amp; password or PAT</li>
+          <li>Session clears automatically on disconnect or server stop</li>
+        </ul>
+      </div>
+
+      <div class="auth-body">
+        <div class="section-eyebrow">JIRA AUTHENTICATION</div>
+        <h2 class="auth-heading">Connect your Jira account</h2>
+        <p class="auth-desc">
+          Sign in with your Jira login ID and password (or switch to a Personal Access Token). IssueMatcher searches Jira using your own account permissions.
+        </p>
+
+        <!-- Auth Mode Tabs -->
+        <div class="auth-mode-tabs" role="tablist" aria-label="Authentication method">
+          <button type="button" class="auth-tab active" id="tabBasic" data-auth-mode="basic" role="tab" aria-selected="true">
+            Username &amp; Password
+          </button>
+          <button type="button" class="auth-tab" id="tabBearer" data-auth-mode="bearer" role="tab" aria-selected="false">
+            Personal Access Token (PAT)
+          </button>
+        </div>
+
+        <form id="loginForm" autocomplete="on" novalidate>
+          <div class="form-group">
+            <label for="jiraUrlInput">Jira Server URL</label>
+            <div class="input-with-icon">
+              <span class="input-icon" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <line x1="2" y1="12" x2="22" y2="12"></line>
+                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                </svg>
+              </span>
+              <input
+                id="jiraUrlInput"
+                type="url"
+                placeholder="https://jira.your-company.com"
+                required
+              />
+            </div>
+          </div>
+
+          <div class="form-group" id="usernameFieldGroup">
+            <label for="jiraUsernameInput" id="usernameLabel">Jira username</label>
+            <div class="input-with-icon">
+              <span class="input-icon" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                  <circle cx="12" cy="7" r="4"></circle>
+                </svg>
+              </span>
+              <input
+                id="jiraUsernameInput"
+                type="text"
+                autocomplete="username"
+                placeholder="Enter your Jira username / login ID"
+              />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="jiraSecretInput" id="secretLabel">Jira password</label>
+            <div class="input-with-icon input-with-action">
+              <span class="input-icon" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                </svg>
+              </span>
+              <input
+                id="jiraSecretInput"
+                type="password"
+                autocomplete="current-password"
+                placeholder="Enter your Jira password"
+                required
+              />
+              <button type="button" id="toggleSecretBtn" class="input-action-btn">Show</button>
+            </div>
+          </div>
+
+          <div id="authErrorBox" class="alert-error hidden" role="alert"></div>
+
+          <button type="submit" id="connectBtn" class="btn-primary btn-full">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            </svg>
+            <span id="connectBtnLabel">Connect to Jira</span>
+          </button>
+        </form>
+
+        <div class="privacy-callout">
+          <div class="privacy-callout-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            </svg>
+          </div>
+          <div>
+            <strong>Temporary and private</strong>
+            <p>Your password or token is sent once to the local IssueMatcher backend and held temporarily in server memory. It is never stored in your browser, written to disk, or returned in API responses.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- WORKSPACE VIEW (Shown when connected) -->
+    <section id="workspaceSection" class="workspace hidden">
+      <!-- Connected Account Summary Bar -->
+      <div class="account-bar">
+        <div class="account-left">
+          <div class="account-shield" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+              <polyline points="9 12 11 14 15 10"></polyline>
+            </svg>
+          </div>
+          <div>
+            <div class="meta-label">CONNECTED JIRA ACCOUNT</div>
+            <div id="accountDisplayName" class="account-name">—</div>
+            <div id="accountUsername" class="account-sub">—</div>
+          </div>
+        </div>
+
+        <div class="account-right">
+          <div class="account-meta-col">
+            <div class="meta-label">JIRA SERVER</div>
+            <div id="accountServerHost" class="account-meta-val">—</div>
+          </div>
+          <div class="account-meta-col">
+            <div class="meta-label">AI ENGINE</div>
+            <div id="accountAiStatus" class="account-meta-val">—</div>
+          </div>
+          <div class="account-meta-col">
+            <div class="meta-label">SESSION EXPIRES</div>
+            <div id="accountSessionExpires" class="account-meta-val">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Search Query Card -->
+      <div class="search-card">
+        <div class="search-card-header">
+          <div>
+            <div class="section-eyebrow">SEARCH QUERY</div>
+            <h2 class="card-title">What are you looking for?</h2>
+          </div>
+          <button type="button" id="howToSearchBtn" class="btn-outline-sm">How to search</button>
+        </div>
+
+        <div class="query-box-wrap">
+          <span class="query-box-icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+          </span>
+          <textarea
+            id="searchQueryInput"
+            rows="3"
+            maxlength="500"
+            placeholder="Describe the issue, paste a summary, or enter a key such as TMRW-746582..."
+          ></textarea>
+          <div class="query-counter">
+            <span id="queryCharCount">0</span>/500
+          </div>
+        </div>
+
+        <!-- Program / Project Filter Box -->
+        <div class="filter-panel">
+          <div class="filter-panel-top">
+            <div>
+              <label for="programProjectSelect" class="filter-title" id="programProjectTitle">Program/Project</label>
+              <p class="filter-desc">Select the Program/Project that should restrict this IssueMatcher search.</p>
+            </div>
+            <button type="button" id="refreshMetadataBtn" class="btn-outline-sm">Refresh</button>
+          </div>
+          <select id="programProjectSelect" class="select-control">
+            <option value="ALL">All Program/Projects</option>
+          </select>
+          <div class="filter-footer">
+            <span id="programScopeStatus" class="filter-status">
+              <span class="dot-blue"></span>
+              Searching across all Program/Projects
+            </span>
+            <span id="programCountLabel" class="filter-count">Loading values...</span>
+          </div>
+        </div>
+
+        <!-- Issue Type Filter Box -->
+        <div class="filter-panel">
+          <div class="filter-panel-top">
+            <div>
+              <label for="issueTypeSelect" class="filter-title">What do you want to search?</label>
+              <p class="filter-desc">Restrict the Jira search to a specific issue type or search across all accessible issue types.</p>
+            </div>
+          </div>
+          <select id="issueTypeSelect" class="select-control">
+            <option value="ALL">All issue types</option>
+          </select>
+          <div class="filter-footer">
+            <span class="filter-hint">Search Test Cases, Defects, Stories, Tasks, and other Jira issue types.</span>
+            <span id="issueTypeScopeStatus" class="filter-status">
+              <span class="dot-blue"></span>
+              No issue-type restriction
+            </span>
+          </div>
+        </div>
+
+        <!-- Bottom Action Bar -->
+        <div class="search-action-row">
+          <label class="toggle-control" for="includeResolvedToggle">
+            <input type="checkbox" id="includeResolvedToggle" checked />
+            <span class="toggle-slider" aria-hidden="true"></span>
+            <span class="toggle-text">
+              <strong>Include resolved issues</strong>
+              <small>Search past solutions and completed work</small>
+            </span>
+          </label>
+
+          <button type="button" id="searchBtn" class="btn-primary btn-search">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <span id="searchBtnLabel">Find related issues</span>
+          </button>
+        </div>
+
+        <div id="searchErrorBox" class="alert-error hidden" role="alert"></div>
+      </div>
+
+      <!-- Quick Examples -->
+      <div class="quick-examples">
+        <div class="quick-examples-label">QUICK EXAMPLES</div>
+        <div class="quick-examples-list" id="quickExamplesList">
+          <button type="button" class="example-chip" data-example="VPN account is locked after changing password">
+            <strong>Access issue:</strong> VPN account is locked after changing password
+          </button>
+          <button type="button" class="example-chip" data-example="Create backend service project structure using agreed technology stack">
+            <strong>Engineering task:</strong> Create backend service project structure using agreed technology stack
+          </button>
+          <button type="button" class="example-chip" data-example="LoadRunner new onboarding access request">
+            <strong>Request Access:</strong> LoadRunner new onboarding access request
+          </button>
+        </div>
+      </div>
+
+      <!-- Live Progress Card (Visible while searching) -->
+      <div id="searchProgressCard" class="progress-card hidden" aria-live="polite">
+        <div class="progress-left">
+          <div class="progress-spinner" aria-hidden="true"></div>
+          <div>
+            <div class="progress-title">Searching across Jira</div>
+            <div id="progressSubtitle" class="progress-desc">
+              Understanding the query, retrieving candidates, and calculating relevance scores.
+            </div>
+          </div>
+        </div>
+        <div class="progress-steps">
+          <span class="step-pill active" id="stepUnderstanding">Understanding</span>
+          <span class="step-pill" id="stepRetrieving">Retrieving</span>
+          <span class="step-pill" id="stepRanking">Ranking</span>
+        </div>
+      </div>
+
+      <!-- SEARCH RESULTS SECTION -->
+      <section id="resultsSection" class="results-section hidden">
+        <div class="results-header">
+          <div>
+            <div class="section-eyebrow">SEARCH RESULTS</div>
+            <h2 class="results-title">Potential matches</h2>
+            <p class="results-subtitle">Ranked using summary, description, comments, labels, and link metadata.</p>
+          </div>
+
+          <div class="results-metrics">
+            <div class="metric-tile">
+              <span id="metricCandidates" class="metric-num">0</span>
+              <span class="metric-cap">CANDIDATES</span>
+            </div>
+            <div class="metric-tile">
+              <span id="metricResults" class="metric-num">0</span>
+              <span class="metric-cap">RESULTS</span>
+            </div>
+            <div class="metric-tile">
+              <span id="metricTime" class="metric-num">0.0 sec</span>
+              <span class="metric-cap">SEARCH TIME</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI Query Enrichment Banner -->
+        <div id="enrichmentBanner" class="enrichment-banner hidden">
+          <div class="enrichment-icon" aria-hidden="true">AI</div>
+          <div class="enrichment-body">
+            <div id="enrichmentHeading" class="enrichment-title">AI query enrichment applied</div>
+            <div id="enrichmentInterpreted" class="enrichment-text"></div>
+            <div id="enrichmentChips" class="enrichment-chips"></div>
+          </div>
+        </div>
+
+        <!-- Issue Type Filter Tabs & Quick Filter -->
+        <div class="results-toolbar">
+          <div id="resultTypeTabs" class="type-tabs" role="tablist"></div>
+          <div class="results-subfilter">
+            <input
+              id="resultsFilterInput"
+              type="search"
+              placeholder="Filter results by key, text, status..."
+              aria-label="Filter displayed results"
+            />
+          </div>
+        </div>
+
+        <div id="resultsCountBar" class="results-count-bar"></div>
+
+        <!-- Results List -->
+        <div id="resultsList" class="results-list"></div>
+
+        <!-- Empty State -->
+        <div id="emptyResultsBox" class="empty-state hidden">
+          <div class="empty-icon" aria-hidden="true">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+          </div>
+          <h3>No matching Jira issues found</h3>
+          <p>Try broadening your description, switching Program/Project to "All Program/Projects", enabling "Include resolved issues", or checking a different issue type.</p>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <span class="footer-logo" aria-hidden="true">Q</span>
+        <strong>IssueMatcher</strong>
+      </div>
+      <p class="footer-disclaimer">
+        Jira remains the source of truth. Review a related issue before relying on its resolution or deciding not to create a new ticket.
+      </p>
+      <button type="button" id="footerGuideBtn" class="footer-link">User Guide</button>
+    </div>
+  </footer>
+
+  <!-- User Guide Modal -->
+  <div id="guideModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="guideModalTitle">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="guideModalTitle">How to use IssueMatcher</h3>
+        <button type="button" id="closeGuideBtn" class="modal-close" aria-label="Close guide">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="guide-step">
+          <span class="guide-num">1</span>
+          <div>
+            <strong>Connect with your Jira credentials</strong>
+            <p>Sign in with your Jira username and password (Basic Auth) or switch to a Personal Access Token (PAT). Credentials live only in backend server memory and are wiped when you click Disconnect or stop the server.</p>
+          </div>
+        </div>
+        <div class="guide-step">
+          <span class="guide-num">2</span>
+          <div>
+            <strong>Describe the issue or paste a ticket key</strong>
+            <p>Enter a natural-language description, a draft Jira summary, or an existing ticket key (e.g. <code>TMRW-746582</code>). Press <code>Ctrl + Enter</code> to run the search.</p>
+          </div>
+        </div>
+        <div class="guide-step">
+          <span class="guide-num">3</span>
+          <div>
+            <strong>Narrow scope when helpful</strong>
+            <p>Use the <strong>Program/Project</strong> and <strong>Issue Type</strong> dropdowns to focus on a specific team or ticket category. Keep <strong>Include resolved issues</strong> enabled to catch previously solved work.</p>
+          </div>
+        </div>
+        <div class="guide-step">
+          <span class="guide-num">4</span>
+          <div>
+            <strong>Review hybrid Keyword + AI scores</strong>
+            <p>Each match shows a <strong>Keyword Match</strong> score, an <strong>AI Relevance</strong> score, and an <strong>Overall Match</strong> score (High &ge; 70%, Medium 40–69%, Low &lt; 40%), along with shared concepts and important scope differences.</p>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="confirmGuideBtn" class="btn-primary">Got it</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
