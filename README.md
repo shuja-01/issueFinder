@@ -11,6 +11,7 @@ IssueMatcher helps teams check whether a similar or duplicate Jira ticket alread
   2. **Retrieving:** Runs multi-pass JQL searches across summaries, descriptions, comments, components, labels, and linked issues using your own Jira permissions.
   3. **Ranking:** Combines IDF-weighted lexical scoring with AI semantic assessment to produce **Keyword Match**, **AI Relevance**, and **Overall Match** scores, plus **Shared concepts**, **Important differences**, and confidence badges.
 - **Zero Build Step & Zero-Dependency Fallback:** Uses plain HTML, CSS, and vanilla JavaScript on the frontend and Node.js built-in HTTP/fetch on the backend (with a built-in `.env` parser fallback if `npm install` cannot be run).
+- **CMD + Date-Wise File Logging:** Logs every incoming HTTP request/response, outbound Jira API request/response, and outbound AI LLM request/response to both the terminal (CMD) and daily files (`logs/YYYY-MM-DD.log`). Automatically redacts passwords, tokens, and Authorization headers, and keeps only the last `LOG_RETENTION_DAYS` days (default `5`, configurable in `.env`).
 
 ## Project Structure
 
@@ -19,9 +20,11 @@ issueFinder/
 ├── server.js                  # Lightweight Node.js HTTP server & REST APIs
 ├── lib/
 │   ├── env.js                 # .env loader (uses dotenv or built-in fallback)
+│   ├── logger.js              # CMD + date-wise file logger with retention cleanup & secret redaction
 │   ├── jira-client.js         # Jira Basic/PAT auth, retry/429 handling, metadata & JQL search
 │   ├── ai-client.js           # Enterprise OpenAI-compatible LLM client (/chat/completions)
 │   └── similarity-engine.js   # 3-stage Understanding -> Retrieving -> Hybrid AI Ranking engine
+├── logs/                      # Auto-created daily log files (YYYY-MM-DD.log, gitignored)
 ├── public/
 │   ├── index.html             # Single-page UI (Login + Search + Results + User Guide)
 │   ├── styles.css             # Clean responsive stylesheet (no external CDNs)
@@ -40,6 +43,7 @@ issueFinder/
    - `INTERNAL_LLM_BASE_URL`
    - `INTERNAL_LLM_MODEL` (e.g., `llama4`)
    - `INTERNAL_LLM_API_KEY`
+   - `LOG_DIR=logs` and `LOG_RETENTION_DAYS=5` (change `5` to keep more or fewer days of date-wise log files)
    - If your internal Jira/LLM uses a corporate self-signed certificate that Node doesn't trust by default, set `ALLOW_INSECURE_TLS=true`.
 3. **(Optional) Install dependencies:**
    ```bash

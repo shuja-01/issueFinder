@@ -1,6 +1,16 @@
 const { loadEnv } = require('./lib/env');
 loadEnv();
 
+const {
+  initLogger,
+  getLogConfig,
+  logInfo,
+  logError,
+  logRequest,
+  logResponse
+} = require('./lib/logger');
+initLogger();
+
 // Optional: allow enterprise self-signed TLS certificates when explicitly enabled in .env
 if (String(process.env.ALLOW_INSECURE_TLS || '').toLowerCase() === 'true') {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
@@ -27,6 +37,7 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 // Strictly in-memory session & short-lived metadata cache. Never written to disk.
 let activeSession = null;
 let metadataCache = null;
+let requestCounter = 0;
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -38,7 +49,15 @@ const MIME_TYPES = {
   '.ico': 'image/x-icon'
 };
 
-function sendJson(res, statusCode, payload) {
+function sendJson(res, statusCode, payload, reqCtx) {
+  const durationMs = reqCtx ? Date.now() - reqCtx.startedAt : 0;
+  if (reqCtx) {
+    logResponse(
+      'HTTP',
+      `${reqCtx.id} ${reqCtx.method} ${reqCtx.url} -> HTTP ${statusCode} (${durationMs}ms)`,
+      { statusCode, durationMs, body: payload }
+    );
+  }
   res.writeHead(statusCode, {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
@@ -112,22 +131,32 @@ function buildPublicSessionInfo(session) {
   };
 }
 
-function serveStaticFile(reqPath, res) {
+function serveStaticFile(reqPath, res, reqCtx) {
   const safeRelative = reqPath === '/' ? '/index.html' : reqPath;
   const resolvedPath = path.normalize(path.join(PUBLIC_DIR, safeRelative));
 
   // Prevent directory traversal outside public/
   if (!resolvedPath.startsWith(PUBLIC_DIR)) {
-    return sendJson(res, 403, { error: 'Forbidden' });
+    return sendJson(res, 403, { error: 'Forbidden' }, reqCtx);
   }
 
   fs.readFile(resolvedPath, (err, content) => {
     if (err) {
-      return sendJson(res, 404, { error: 'Not found' });
+      return sendJson(res, 404, { error: 'Not found' }, reqCtx);
     }
     const ext = path.extname(resolvedPath).toLowerCase();
+    const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+    const durationMs = reqCtx ? Date.now() - reqCtx.startedAt : 0;
+
+    if (reqCtx) {
+      logResponse(
+        'HTTP',
+        `${reqCtx.id} ${reqCtx.method} ${reqCtx.url} -> HTTP 200 (${durationMs}ms, ${content.length} bytes, ${contentType})`
+      );
+    }
+
     res.writeHead(200, {
-      'Content-Type': MIME_TYPES[ext] || 'application/octet-stream',
+      'Content-Type': contentType,
       'Cache-Control': 'no-store',
       'X-Content-Type-Options': 'nosniff'
     });
@@ -136,14 +165,36 @@ function serveStaticFile(reqPath, res) {
 }
 
 const server = http.createServer(async (req, res) => {
+  const reqCtx = {
+    id: `REQ-${++requestCounter}`,
+    method: req.method,
+    url: req.url,
+    startedAt: Date.now()
+  };
+
   try {
     const parsedUrl = new URL(req.url, `http://localhost:${PORT}`);
     const pathname = parsedUrl.pathname;
 
     // Static assets (HTML, CSS, JS)
     if (req.method === 'GET' && !pathname.startsWith('/api/')) {
-      return serveStaticFile(pathname, res);
+      logRequest('HTTP', `${reqCtx.id} ${req.method} ${req.url} (static)`);
+      return serveStaticFile(pathname, res, reqCtx);
     }
+
+    // Parse body upfront for POST/PUT/PATCH API requests so we can log every request cleanly
+    let body = {};
+    if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
+      body = await readJsonBody(req);
+    }
+
+    const queryObj = Object.fromEntries(parsedUrl.searchParams.entries());
+    logRequest('HTTP', `${reqCtx.id} ${req.method} ${req.url}`, {
+      method: req.method,
+      path: pathname,
+      ...(Object.keys(queryObj).length > 0 ? { query: queryObj } : {}),
+      ...(Object.keys(body).length > 0 ? { body } : {})
+    });
 
     // Health check
     if (req.method === 'GET' && pathname === '/api/health') {
@@ -154,7 +205,7 @@ const server = http.createServer(async (req, res) => {
         connected: Boolean(session),
         aiConfigured: ai.configured,
         aiModel: ai.model
-      });
+      }, reqCtx);
     }
 
     // Bootstrap configuration & live session status (never returns secrets)
@@ -170,33 +221,32 @@ const server = http.createServer(async (req, res) => {
         sessionTtlMinutes: SESSION_TTL_MINUTES,
         ai,
         session: buildPublicSessionInfo(session)
-      });
+      }, reqCtx);
     }
 
     // Authenticate with Jira (Username + Password Basic Auth OR PAT Bearer Auth)
     if (req.method === 'POST' && pathname === '/api/auth/connect') {
-      const body = await readJsonBody(req);
       const rawUrl = (body.baseUrl || process.env.JIRA_BASE_URL || '').trim();
       const authType = body.authType === 'bearer' ? 'bearer' : 'basic';
       const username = String(body.username || '').trim();
       const secret = String(body.secret || '');
 
       if (!rawUrl) {
-        return sendJson(res, 400, { error: 'Jira Base URL is required.' });
+        return sendJson(res, 400, { error: 'Jira Base URL is required.' }, reqCtx);
       }
       if (!secret) {
         return sendJson(res, 400, {
           error: authType === 'bearer' ? 'Personal Access Token is required.' : 'Jira password is required.'
-        });
+        }, reqCtx);
       }
       if (authType !== 'bearer' && !username) {
-        return sendJson(res, 400, { error: 'Jira username is required for password login.' });
+        return sendJson(res, 400, { error: 'Jira username is required for password login.' }, reqCtx);
       }
 
       const baseUrl = cleanBaseUrl(rawUrl);
       const candidate = { baseUrl, username, secret, authType };
 
-      console.log(`[Auth] Validating Jira connection (${authType}) for ${username || 'PAT user'} -> ${baseUrl}`);
+      logInfo('AUTH', `${reqCtx.id} Validating Jira connection (${authType}) for ${username || 'PAT user'} -> ${baseUrl}`);
       const profile = await validateJiraCredentials(candidate);
 
       const now = Date.now();
@@ -214,21 +264,23 @@ const server = http.createServer(async (req, res) => {
 
       return sendJson(res, 200, {
         session: buildPublicSessionInfo(activeSession)
-      });
+      }, reqCtx);
     }
 
     // Disconnect and wipe credentials from memory
     if (req.method === 'POST' && pathname === '/api/auth/disconnect') {
+      const prevUser = activeSession?.username || 'none';
       activeSession = null;
       metadataCache = null;
-      return sendJson(res, 200, { disconnected: true });
+      logInfo('AUTH', `${reqCtx.id} Disconnected Jira session (user=${prevUser})`);
+      return sendJson(res, 200, { disconnected: true }, reqCtx);
     }
 
     // Load Program/Project options & Jira Issue Types
     if (req.method === 'GET' && pathname === '/api/metadata') {
       const session = getActiveSession();
       if (!session) {
-        return sendJson(res, 401, { error: 'Jira session expired or not connected. Please reconnect.' });
+        return sendJson(res, 401, { error: 'Jira session expired or not connected. Please reconnect.' }, reqCtx);
       }
 
       const forceRefresh = parsedUrl.searchParams.get('refresh') === 'true';
@@ -240,7 +292,8 @@ const server = http.createServer(async (req, res) => {
         metadataCache.username === session.username &&
         Date.now() - metadataCache.loadedAtMs < CACHE_TTL_MS
       ) {
-        return sendJson(res, 200, metadataCache.data);
+        logInfo('METADATA', `${reqCtx.id} Serving cached metadata for ${session.username}`);
+        return sendJson(res, 200, metadataCache.data, reqCtx);
       }
 
       const data = await fetchMetadata(session);
@@ -250,24 +303,23 @@ const server = http.createServer(async (req, res) => {
         data
       };
 
-      return sendJson(res, 200, data);
+      return sendJson(res, 200, data, reqCtx);
     }
 
     // Similarity Search API (Understanding -> Retrieving -> Hybrid Lexical + AI Ranking)
     if (req.method === 'POST' && pathname === '/api/search') {
       const session = getActiveSession();
       if (!session) {
-        return sendJson(res, 401, { error: 'Jira session expired or not connected. Please reconnect.' });
+        return sendJson(res, 401, { error: 'Jira session expired or not connected. Please reconnect.' }, reqCtx);
       }
 
-      const body = await readJsonBody(req);
       const query = String(body.query || '').trim();
 
       if (!query) {
-        return sendJson(res, 400, { error: 'Please enter an issue description, summary, or Jira ticket key.' });
+        return sendJson(res, 400, { error: 'Please enter an issue description, summary, or Jira ticket key.' }, reqCtx);
       }
       if (query.length > 1000) {
-        return sendJson(res, 400, { error: 'Search query must be 1000 characters or fewer.' });
+        return sendJson(res, 400, { error: 'Search query must be 1000 characters or fewer.' }, reqCtx);
       }
 
       // Slide session expiry forward on active usage
@@ -283,23 +335,39 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, {
         ...searchResult,
         sessionExpiresAt: new Date(session.expiresAtMs).toISOString()
-      });
+      }, reqCtx);
     }
 
-    return sendJson(res, 404, { error: 'Endpoint not found.' });
+    return sendJson(res, 404, { error: 'Endpoint not found.' }, reqCtx);
   } catch (err) {
     const statusCode = err.statusCode || 500;
-    console.error(`[Server Error] ${req.method} ${req.url} -> ${statusCode}: ${err.message}`);
+    logError('SERVER', `${reqCtx.id} ${req.method} ${req.url} -> HTTP ${statusCode}: ${err.message}`, {
+      stack: err.stack
+    });
     return sendJson(res, statusCode, {
       error: err.message || 'An unexpected server error occurred.'
-    });
+    }, reqCtx);
   }
+});
+
+process.on('uncaughtException', err => {
+  logError('PROCESS', `Uncaught exception: ${err.message}`, { stack: err.stack });
+});
+
+process.on('unhandledRejection', reason => {
+  const message = reason instanceof Error ? reason.message : String(reason);
+  const stack = reason instanceof Error ? reason.stack : undefined;
+  logError('PROCESS', `Unhandled promise rejection: ${message}`, { stack });
 });
 
 server.listen(PORT, 'localhost', () => {
   const ai = getAiStatus();
-  console.log('====================================================');
-  console.log(`IssueMatcher running at http://localhost:${PORT}`);
-  console.log(`AI Engine: ${ai.configured ? `Enabled (${ai.model})` : 'Keyword-only mode (configure INTERNAL_LLM_* in .env)'}`);
-  console.log('====================================================');
+  const logCfg = getLogConfig();
+  logInfo('SERVER', `IssueMatcher started at http://localhost:${PORT}`, {
+    port: PORT,
+    aiEngine: ai.configured ? `Enabled (${ai.model})` : 'Keyword-only mode (configure INTERNAL_LLM_* in .env)',
+    logDir: logCfg.logDir,
+    logRetentionDays: logCfg.retentionDays,
+    logMaxBodyChars: logCfg.maxBodyChars
+  });
 });
