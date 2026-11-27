@@ -2,7 +2,6 @@
   'use strict';
 
   const $ = id => document.getElementById(id);
-  const STORAGE_THEME_KEY = 'issuematcher_theme';
   const STORAGE_HISTORY_KEY = 'issuematcher_recent_queries';
 
   const state = {
@@ -134,29 +133,6 @@
     }
     el.textContent = message;
     el.classList.remove('hidden');
-  }
-
-  // --- Theme Persistence ---
-  function applyTheme(theme) {
-    const mode = theme === 'dark' ? 'dark' : 'light';
-    document.documentElement.setAttribute('data-theme', mode);
-    $('themeIconSun').classList.toggle('hidden', mode !== 'dark');
-    $('themeIconMoon').classList.toggle('hidden', mode === 'dark');
-    try {
-      localStorage.setItem(STORAGE_THEME_KEY, mode);
-    } catch {
-      // ignore storage errors
-    }
-  }
-
-  function initTheme() {
-    let saved = 'light';
-    try {
-      saved = localStorage.getItem(STORAGE_THEME_KEY) || 'light';
-    } catch {
-      saved = 'light';
-    }
-    applyTheme(saved);
   }
 
   // --- Recent Searches (Browser-local, zero credentials) ---
@@ -1016,11 +992,6 @@
   }
 
   // --- Event Listeners ---
-  $('themeToggleBtn').addEventListener('click', () => {
-    const current = document.documentElement.getAttribute('data-theme');
-    applyTheme(current === 'dark' ? 'light' : 'dark');
-  });
-
   $('tabBasic').addEventListener('click', () => setAuthMode('basic'));
   $('tabBearer').addEventListener('click', () => setAuthMode('bearer'));
 
@@ -1300,7 +1271,6 @@
 
   // --- Bootstrap ---
   async function init() {
-    initTheme();
     setAuthMode('basic');
     renderRecentSearches();
     syncQueryCounter();
